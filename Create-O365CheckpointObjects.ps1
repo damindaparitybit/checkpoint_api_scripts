@@ -21,8 +21,8 @@
   .PARAMETER Port
   An optional MDS domain name to use
   .PARAMETER Service
-  An optional Office 365 to filter on (among "WAC","Sway","Planner","Yammer","OfficeMobile", "ProPlus",
-  "RCA","OneNote","OfficeiPad","EXO","SPO","Office365Video","LYO","Identity","CRLs","o365" and "EOP"
+  An optional Office 365 to filter on (among "WAC","Sway","Planner","Yammer","OfficeMobile","ProPlus","RCA","OneNote",
+  "OfficeiPad","EXO","SPO","Office365Video","LYO","Identity","CRLs","o365","EOP","Teams","EX-Fed")
   If not specified, all Office 365 services objects will be created
   .PARAMETER Type
   A mandatory object type to filter on (among "IPv4","IPv6","URL")
