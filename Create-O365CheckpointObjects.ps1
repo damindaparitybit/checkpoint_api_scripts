@@ -21,8 +21,8 @@
   .PARAMETER Port
   An optional MDS domain name to use
   .PARAMETER Service
-  An optional Office 365 to filter on (among "WAC","Sway","Planner","Yammer","OfficeMobile","ProPlus","RCA","OneNote",
-  "OfficeiPad","EXO","SPO","Office365Video","LYO","Identity","CRLs","o365","EOP","Teams","EX-Fed")
+  An optional Office 365 to filter on (among "WAC","Sway","Planner","Yammer","OfficeMobile", "ProPlus",
+  "RCA","OneNote","OfficeiPad","EXO","SPO","Office365Video","LYO","Identity","CRLs","o365" and "EOP"
   If not specified, all Office 365 services objects will be created
   .PARAMETER Type
   A mandatory object type to filter on (among "IPv4","IPv6","URL")
@@ -172,7 +172,7 @@ If ($count -eq 0) {
   Exit 1
   } Else {
   Write-Host "Found $count objects matching the filters"
-  $confirmation = Read-Host "Are you sure you want to proceed (y|n) ?"
+  $confirmation = Read-Host "Are you sure you want to proceed and connect to the Checkpoint server (y|n) ?"
   if ($confirmation -ne 'y') {
     Exit 
   }
@@ -203,6 +203,7 @@ $myCPHeader=@{"x-chkp-sid"=$mysid}
 
 Write-Host "***************** Creating O365 objects ********************" -BackgroundColor Yellow -ForegroundColor Black
 # Looping through Office 365 services
+$updated = $false
 Foreach ($srv in ($objs | Select-Object -Unique Service) ) {
   $grpname = "{0}_{1}_{2}" -f $Prefix, $Type, $srv.Service
   
@@ -219,6 +220,8 @@ Foreach ($srv in ($objs | Select-Object -Unique Service) ) {
       $urllist += $URL
     }
     
+    $urllist = $urllist | sort -unique
+    
     $mybody=@{name="$grpname"}
     $myresponse = CPAPIRequest -uri $ShowAppURI -body $mybody -headers $myCPHeader 
     $myresponsecontent=$myresponse.Content | ConvertFrom-Json
@@ -227,14 +230,17 @@ Foreach ($srv in ($objs | Select-Object -Unique Service) ) {
       $cmp = Compare-Object -ReferenceObject $myresponsecontent.'url-list' -DifferenceObject $urllist | ft inputobject, @{n="Action";e={ if ($_.SideIndicator -eq '=>') { "ADD" } else { "REMOVE" } }} | out-string
       If ($cmp) { 
         Write-Host $cmp               
+        
         $mybody=@{name=$grpname;"primary-category"=$Category;color="cyan";"urls-defined-as-regular-expression"=$True;"url-list"=$urllist}
         $myresponse = CPAPIRequest -uri $SetAppURI -body $mybody -headers $myCPHeader
+        $updated = $true
         
       } Else { Write-host "No difference in URL list" }      
     } Else {
       Write-Host "Creating application $grpname" -ForegroundColor Green
       $mybody=@{name=$grpname;"primary-category"=$Category;color="cyan";"urls-defined-as-regular-expression"=$True;"url-list"=$urllist}
-      $myresponse = CPAPIRequest -uri $AddAppURI -body $mybody -headers $myCPHeader   
+      $myresponse = CPAPIRequest -uri $AddAppURI -body $mybody -headers $myCPHeader
+      $updated = $true
     }
   }
   
@@ -250,6 +256,7 @@ Foreach ($srv in ($objs | Select-Object -Unique Service) ) {
             subnetmasklength=$SubNetMaskLength 
       }
     }
+    
     $mybody=@{name=$grpname}
     $myresponse = CPAPIRequest -uri $ShowGrpURI -body $mybody -headers $myCPHeader
     $myresponsecontent=$myresponse.Content | ConvertFrom-Json
@@ -258,63 +265,71 @@ Foreach ($srv in ($objs | Select-Object -Unique Service) ) {
       Write-Host "$grpname already exists. Updating list of members..."  
       $old = $myresponsecontent.members | Foreach { $_.Name}
       $new = $members | Foreach { $_.name}
+      $new = $new | sort -unique
       $cmp = Compare-Object -ReferenceObject $old -DifferenceObject $new| ft inputobject, @{n="Action";e={ if ($_.SideIndicator -eq '=>') { "ADD" } else { "REMOVE" } }} | out-string
       If ($cmp) { 
         Write-Host $cmp
         
         Foreach ($member in $members) {      
-          Write-host "Object $($member.Name) of type $Type"
+          Write-host "Object $($member.Name) of type $Type will be included in the group"
           $mybody=@{name=$member.Name;color="cyan";subnet=$member.IPAddress;"mask-length"=$member.SubNetMaskLength}
-          $myresponse = CPAPIRequest -uri $AddNetURI -body $mybody -headers $myCPHeader   
+          $myresponse = CPAPIRequest -uri $AddNetURI -body $mybody -headers $myCPHeader
+          $updated = $true
         }
         
         Write-Host "Updating group $grpname" -ForegroundColor Green
         $members = $members | Foreach { $_.name}
         $mybody=@{name=$grpname;members=$members}
         $myresponse = CPAPIRequest -uri $SetGrpURI -body $mybody -headers $myCPHeader
+        $updated = $true
 
       } Else { Write-host "No difference in list of members"}
     } 
 
     Else {
       Foreach ($member in $members) {      
-        Write-host "Object $($member.Name) of type $Type"
+        Write-host "Object $($member.Name) of type $Type will be included in the group"
         $mybody=@{name=$member.Name;color="cyan";subnet=$member.IPAddress;"mask-length"=$member.SubNetMaskLength}
-        $myresponse = CPAPIRequest -uri $AddNetURI -body $mybody -headers $myCPHeader   
+        $myresponse = CPAPIRequest -uri $AddNetURI -body $mybody -headers $myCPHeader
+        $updated = $true
       }
       Write-Host "Creating group $grpname" -ForegroundColor Green
       $mybody=@{name=$grpname;color="cyan"}
       $myresponse = CPAPIRequest -uri $AddGrpURI -body $mybody -headers $myCPHeader
+      $updated = $true
       
       Write-host "Adding objects to group $grpname" -ForegroundColor Green
       $members = $members | Foreach { $_.name}
       $mybody=@{name=$grpname;members=$members}
-      $myresponse = CPAPIRequest -uri $SetGrpURI -body $mybody -headers $myCPHeader       
+      $myresponse = CPAPIRequest -uri $SetGrpURI -body $mybody -headers $myCPHeader
+      $updated = $true
     }
   }
 }
 
 Write-Host
-$confirmation = Read-Host "Do you want to publish the objects (y|n) ?"
-if ($confirmation -eq 'y') {
-  # Publish the objects
-  $myresponse = CPAPIRequest -uri $publishURI -body @{} -headers $myCPHeader
-  If ($myresponse.statuscode -eq 200){
-    Write-Host "Successfully published the objects." -ForegroundColor Green    
+if ($updated) {
+  $confirmation = Read-Host "Do you want to publish the changes (y|n) ?"
+  if ($confirmation -eq 'y') {
+    # Publish the objects
+    $myresponse = CPAPIRequest -uri $publishURI -body @{} -headers $myCPHeader
+    If ($myresponse.statuscode -eq 200){
+      Write-Host "Successfully published the changes." -ForegroundColor Green    
+    }
+    Else {
+      Write-Host "Error when publishing the changes." -ForegroundColor Red
+    }
   }
   Else {
-    Write-Host "Error when publishing the objects." -ForegroundColor Red
+    $myresponse = CPAPIRequest -uri $discardURI -body @{} -headers $myCPHeader
+    If ($myresponse.statuscode -eq 200){
+      Write-Host "Successfully discarded the changes." -ForegroundColor Green    
+    }
+    Else {
+      Write-Host "Error when discarding the changes." -ForegroundColor Red
+    }  
   }
-}
-Else {
-  $myresponse = CPAPIRequest -uri $discardURI -body @{} -headers $myCPHeader
-  If ($myresponse.statuscode -eq 200){
-    Write-Host "Successfully discarded the changes." -ForegroundColor Green    
-  }
-  Else {
-    Write-Host "Error when discarding the changes." -ForegroundColor Red
-  }  
-}
+} Else { Write-Host "Nothing to publish, logging out."}
 
 # logout
 $myresponse = CPAPIRequest -uri $logoutURI -body @{} -headers $myCPHeader
